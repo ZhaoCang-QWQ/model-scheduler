@@ -1,4 +1,4 @@
-"""时段模型调度插件：按时段自动切换回复模型。"""
+"""峰谷时段省钱调度插件：按「星期+时段」自动切换回复模型。"""
 
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -8,7 +8,7 @@ from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 from pydantic import field_validator
 
 SUPPORTED_CONFIG_VERSION = "0.3.0"
-PLUGIN_TAG = "[时段模型调度]"
+PLUGIN_TAG = "[峰谷省钱]"
 
 
 class PluginSectionConfig(PluginConfigBase):
