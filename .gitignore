@@ -1,0 +1,15 @@
+# 敏感/运行时文件 —— 绝不提交仓库
+config.toml
+config.toml.bak*
+.env
+data/
+
+# Python 缓存与构建产物
+__pycache__/
+*.py[cod]
+*.log
+*.egg-info/
+.venv/
+venv/
+dist/
+build/

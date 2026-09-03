@@ -1,0 +1,24 @@
+# 本文件是「时段模型调度」插件的配置模板。
+# 复制本文件为同目录下的 config.toml 后修改即可生效。
+# 本插件无敏感信息，但 config.toml 仍建议不要提交到公开仓库。
+# 配置页签与下方 [段名] 一一对应：[plugin]=插件、[rules]=时段规则、[general]=通用。
+
+[plugin]
+enabled = true
+config_version = "0.2.0"
+
+# 时段规则：每条为「时间区间 → 模型」。多条命中时取最上面一条。
+# timezone_offset 留空（或不写）= 跟随 [general] 的全局时区；不同厂商错峰时段公布时区不同时可单独设置（如 0=UTC）。
+[[rules.rules]]
+enabled = true
+note = "DeepSeek 错峰半价（示例，请填模型名）"
+start = "00:30"
+end = "08:30"
+model_name = ""
+task_names = ["replyer"]
+# timezone_offset = 8
+
+[general]
+timezone_offset = 8
+default_model_name = ""
+log_every_switch = true
