@@ -8,7 +8,8 @@ enabled = true
 config_version = "0.2.0"
 
 # 时段规则：每条为「时间区间 → 模型」。多条命中时取最上面一条。
-# timezone_offset 留空（或不写）= 跟随 [general] 的全局时区；不同厂商错峰时段公布时区不同时可单独设置（如 0=UTC）。
+# use_global_timezone = true（默认）表示跟随 [general] 的全局时区；
+# 不同厂商错峰时段公布时区不同时，可改为 false 并给本规则单独设 timezone_offset（如 0=UTC）。
 [[rules.rules]]
 enabled = true
 note = "DeepSeek 错峰半价（示例，请填模型名）"
@@ -16,7 +17,8 @@ start = "00:30"
 end = "08:30"
 model_name = ""
 task_names = ["replyer"]
-# timezone_offset = 8
+use_global_timezone = true
+timezone_offset = 8.0
 
 [general]
 timezone_offset = 8

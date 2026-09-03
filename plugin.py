@@ -26,28 +26,33 @@ class TimeRuleConfig(PluginConfigBase):
 
     @field_validator("timezone_offset", mode="before")
     @classmethod
-    def _normalize_timezone_offset(cls, v: Any) -> Any:
-        """配置页该字段渲染为文本框：空串/非数字归一化为 None（=跟随全局）；支持小数（半小时区如 5.5）。"""
+    def _normalize_timezone_offset(cls, v: Any) -> float:
+        """配置页该字段以文本框输入：空串/非数字一律回退默认 8.0。
+
+        注意：不得返回 None —— TOML 不支持 null，配置写回会报错。
+        """
         if v is None or isinstance(v, bool):
-            return None
+            return 8.0
         if isinstance(v, (int, float)):
             return float(v)
         if isinstance(v, str):
             s = v.strip()
             if not s:
-                return None
+                return 8.0
             try:
                 return float(s)
             except ValueError:
-                return None
-        return None
+                return 8.0
+        return 8.0
+
     enabled: bool = Field(default=True, description="是否启用本条规则", json_schema_extra={"label": "启用"})
     note: str = Field(default="", description="备注名（如：DeepSeek 错峰半价）", json_schema_extra={"label": "备注", "placeholder": "DeepSeek 错峰半价"})
     start: str = Field(default="00:30", description="开始时间 HH:MM（含）", json_schema_extra={"label": "开始时间", "placeholder": "00:30"})
     end: str = Field(default="08:30", description="结束时间 HH:MM（不含）；开始>结束视为跨午夜区间（如 22:00~06:00）；开始==结束视为全天生效", json_schema_extra={"label": "结束时间", "placeholder": "08:30"})
     model_name: str = Field(default="", description="该时段使用的模型名（必须与麦麦模型配置中的模型 name 完全一致；留空=本条规则无效）", json_schema_extra={"label": "模型名", "placeholder": "如 deepseek-v4-flash", "hint": "须先在麦麦模型配置页定义过该模型"})
     task_names: List[str] = Field(default_factory=lambda: ["replyer"], description="生效任务（本插件作用于回复生成链路，仅 replyer 有效，填写其他任务名不会生效）", json_schema_extra={"label": "生效任务", "hint": "仅 replyer 有效；官方钩子不支持给 planner 等其他任务指定模型"})
-    timezone_offset: Optional[float] = Field(default=None, ge=-12.0, le=14.0, description="本规则的时区偏移（小时）：规则里的开始/结束时间按此时区解释，适用于不同厂商错峰时段公布时区不同的情况。留空=跟随「通用」页的全局设置；支持半小时区（如 5.5）", json_schema_extra={"label": "时区偏移（小时）", "hint": "留空=用通用页的全局设置；8=北京时间；0=UTC；支持小数如 5.5"})
+    use_global_timezone: bool = Field(default=True, description="是否跟随「通用」页的全局时区偏移（默认开启）。关闭后本条规则改用下方 timezone_offset，适配不同厂商错峰时段按不同时区公布的情况", json_schema_extra={"label": "跟随全局时区"})
+    timezone_offset: float = Field(default=8.0, ge=-12.0, le=14.0, description="本规则的时区偏移（小时，支持半小时区如 5.5）。仅当上方「跟随全局时区」关闭时生效", json_schema_extra={"label": "时区偏移（小时）", "hint": "8=北京时间；0=UTC；支持小数如 5.5"})
 
 
 class RulesSectionConfig(PluginConfigBase):
@@ -166,14 +171,17 @@ class ModelSchedulerPlugin(MaiBotPlugin):
                 if not rule_tasks or effective_task not in rule_tasks:
                     continue
 
-                # 规则时区：未设置（留空）时跟随全局偏移
-                raw_rule_offset = getattr(rule, "timezone_offset", None)
-                try:
-                    rule_offset = float(raw_rule_offset) if raw_rule_offset is not None else global_offset
-                except (TypeError, ValueError):
+                # 规则时区：默认跟随全局；仅当规则显式关闭「跟随全局时区」时用规则自身偏移
+                if getattr(rule, "use_global_timezone", True):
                     rule_offset = global_offset
-                if not (-12.0 <= rule_offset <= 14.0):
-                    rule_offset = global_offset
+                else:
+                    raw_rule_offset = getattr(rule, "timezone_offset", None)
+                    try:
+                        rule_offset = float(raw_rule_offset) if raw_rule_offset is not None else global_offset
+                    except (TypeError, ValueError):
+                        rule_offset = global_offset
+                    if not (-12.0 <= rule_offset <= 14.0):
+                        rule_offset = global_offset
 
                 # 时间窗
                 start_m = self._parse_hhmm(getattr(rule, "start", None))
