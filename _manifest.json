@@ -1,6 +1,6 @@
 {
   "manifest_version": 2,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "id": "github.ZhaoCang-QWQ.model-scheduler",
   "name": "时段模型调度",
   "description": "按时段自动切换回复模型：自定义多条「时间区间 → 模型」规则，命中时段用指定模型（如 DeepSeek 错峰半价时段），不命中则不干预。通用调度器，不绑定任何模型厂商。",

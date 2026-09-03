@@ -5,18 +5,32 @@
 
 [plugin]
 enabled = true
-config_version = "0.2.0"
+config_version = "0.3.0"
 
-# 时段规则：每条为「时间区间 → 模型」。多条命中时取最上面一条。
-# use_global_timezone = true（默认）表示跟随 [general] 的全局时区；
-# 不同厂商错峰时段公布时区不同时，可改为 false 并给本规则单独设 timezone_offset（如 0=UTC）。
+# 时段规则：每条为「生效星期 + 时间区间 → 模型」。多条命中时取最上面一条。
+# DeepSeek 官方错峰：高峰=北京时间周一至周五 09:00-12:00、14:00-18:00（标准价），其余（含周末）空闲半价。
+# 因此只需为两个工作日高峰段各写一条规则切到备用模型；空闲时段插件零干预=走候选池默认模型（如 DeepSeek，享半价）。
+# days_of_week：留空=每天；weekday=周一~五；weekend=周六~日；或 mon~sun / 周一~周日。
+# use_global_timezone = true（默认）表示跟随 [general] 的全局时区；需要按其他时区解释时改为 false 并设 timezone_offset。
 [[rules.rules]]
 enabled = true
-note = "DeepSeek 错峰半价（示例，请填模型名）"
-start = "00:30"
-end = "08:30"
+note = "工作日早高峰 09:00-12:00（DeepSeek 标准价 → 切备用模型，请填模型名）"
+start = "09:00"
+end = "12:00"
 model_name = ""
 task_names = ["replyer"]
+days_of_week = ["weekday"]
+use_global_timezone = true
+timezone_offset = 8.0
+
+[[rules.rules]]
+enabled = true
+note = "工作日下午高峰 14:00-18:00（DeepSeek 标准价 → 切备用模型，请填模型名）"
+start = "14:00"
+end = "18:00"
+model_name = ""
+task_names = ["replyer"]
+days_of_week = ["weekday"]
 use_global_timezone = true
 timezone_offset = 8.0
 

@@ -7,7 +7,7 @@ from maibot_sdk import Field, HookHandler, MaiBotPlugin, PluginConfigBase
 from maibot_sdk.types import ErrorPolicy, HookMode, HookOrder
 from pydantic import field_validator
 
-SUPPORTED_CONFIG_VERSION = "0.2.0"
+SUPPORTED_CONFIG_VERSION = "0.3.0"
 PLUGIN_TAG = "[时段模型调度]"
 
 
@@ -51,6 +51,7 @@ class TimeRuleConfig(PluginConfigBase):
     end: str = Field(default="08:30", description="结束时间 HH:MM（不含）；开始>结束视为跨午夜区间（如 22:00~06:00）；开始==结束视为全天生效", json_schema_extra={"label": "结束时间", "placeholder": "08:30"})
     model_name: str = Field(default="", description="该时段使用的模型名（必须与麦麦模型配置中的模型 name 完全一致；留空=本条规则无效）", json_schema_extra={"label": "模型名", "placeholder": "如 deepseek-v4-flash", "hint": "须先在麦麦模型配置页定义过该模型"})
     task_names: List[str] = Field(default_factory=lambda: ["replyer"], description="生效任务（本插件作用于回复生成链路，仅 replyer 有效，填写其他任务名不会生效）", json_schema_extra={"label": "生效任务", "hint": "仅 replyer 有效；官方钩子不支持给 planner 等其他任务指定模型"})
+    days_of_week: List[str] = Field(default_factory=list, description="本规则在星期几生效：留空=每天；weekday=周一~周五；weekend=周六~周日；也可逐个填 mon/tue/wed/thu/fri/sat/sun（或中文 周一~周日）。时区按本规则时区计算", json_schema_extra={"label": "生效星期", "hint": "留空=每天；weekday=工作日；weekend=周末；mon~sun 或 周一~周日"})
     use_global_timezone: bool = Field(default=True, description="是否跟随「通用」页的全局时区偏移（默认开启）。关闭后本条规则改用下方 timezone_offset，适配不同厂商错峰时段按不同时区公布的情况", json_schema_extra={"label": "跟随全局时区"})
     timezone_offset: float = Field(default=8.0, ge=-12.0, le=14.0, description="本规则的时区偏移（小时，支持半小时区如 5.5）。仅当上方「跟随全局时区」关闭时生效", json_schema_extra={"label": "时区偏移（小时）", "hint": "8=北京时间；0=UTC；支持小数如 5.5"})
 
@@ -60,8 +61,17 @@ class RulesSectionConfig(PluginConfigBase):
     __ui_icon__ = "list"
     __ui_order__ = 1
     rules: List[TimeRuleConfig] = Field(
-        default_factory=lambda: [TimeRuleConfig(note="DeepSeek 错峰半价（示例，请填模型名）")],
-        description="规则列表：可添加任意多条「时间区间→模型」规则，命中时段即用该模型；多条命中时取最上面一条",
+        default_factory=lambda: [
+            TimeRuleConfig(
+                note="工作日早高峰 09:00-12:00（DeepSeek 标准价时段 → 切备用模型，请填模型名）",
+                start="09:00", end="12:00", days_of_week=["weekday"],
+            ),
+            TimeRuleConfig(
+                note="工作日下午高峰 14:00-18:00（DeepSeek 标准价时段 → 切备用模型，请填模型名）",
+                start="14:00", end="18:00", days_of_week=["weekday"],
+            ),
+        ],
+        description="规则列表：可添加任意多条「时间区间→模型」规则，命中时段即用该模型；多条命中时取最上面一条。空闲时段无需写规则——插件零干预，走麦麦原模型（如 DeepSeek 半价）",
         json_schema_extra={"label": "规则列表"},
     )
 
@@ -137,6 +147,35 @@ class ModelSchedulerPlugin(MaiBotPlugin):
         local_now = utc_now + timedelta(hours=offset)
         return local_now.hour * 60 + local_now.minute
 
+    _WEEKDAY_ALIASES = {
+        "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6,
+        "周一": 0, "周二": 1, "周三": 2, "周四": 3, "周五": 4, "周六": 5, "周日": 6,
+        "星期一": 0, "星期二": 1, "星期三": 2, "星期四": 3, "星期五": 4, "星期六": 5, "星期日": 6,
+        "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6,
+    }
+
+    @classmethod
+    def _parse_days(cls, specs: Any) -> Optional[set]:
+        """解析生效星期为集合（0=周一..6=周日）；留空/全非法 → None（=每天，不过滤）。"""
+        if not specs:
+            return None
+        if isinstance(specs, str):
+            specs = [specs]
+        days: set = set()
+        for raw in specs:
+            s = str(raw).strip().lower()
+            if not s:
+                continue
+            if s in ("weekday", "workday"):
+                days.update(range(5))
+            elif s == "weekend":
+                days.update((5, 6))
+            else:
+                key = next((k for k in cls._WEEKDAY_ALIASES if k.lower() == s), None)
+                if key is not None:
+                    days.add(cls._WEEKDAY_ALIASES[key])
+        return days or None
+
     def _match_rule(self, **kwargs: Any) -> Optional[str]:
         """核心匹配：返回应使用的模型名，不干预时返回 None。"""
         # 总开关
@@ -183,6 +222,14 @@ class ModelSchedulerPlugin(MaiBotPlugin):
                     if not (-12.0 <= rule_offset <= 14.0):
                         rule_offset = global_offset
 
+                # 按规则时区换算本地时间（星期与时窗都基于它，避免跨时区差一天）
+                local_now = utc_now + timedelta(hours=rule_offset)
+
+                # 星期过滤：days_of_week 留空=每天
+                allowed_days = self._parse_days(getattr(rule, "days_of_week", None) or [])
+                if allowed_days is not None and local_now.weekday() not in allowed_days:
+                    continue
+
                 # 时间窗
                 start_m = self._parse_hhmm(getattr(rule, "start", None))
                 end_m = self._parse_hhmm(getattr(rule, "end", None))
@@ -191,7 +238,7 @@ class ModelSchedulerPlugin(MaiBotPlugin):
                     self.ctx.logger.debug("%s 规则时间解析失败，已跳过（note=%s, start=%s, end=%s）", PLUGIN_TAG, note, getattr(rule, "start", None), getattr(rule, "end", None))
                     continue
 
-                now_minutes = self._minutes_in_offset(utc_now, rule_offset)
+                now_minutes = local_now.hour * 60 + local_now.minute
                 if self._in_window(now_minutes, start_m, end_m):
                     return model_name
             except Exception:
